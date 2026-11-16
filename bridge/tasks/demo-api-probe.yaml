@@ -1,0 +1,10 @@
+name: demo-api-probe
+description: 调用内网 HTTP 接口查询某环境/服务的状态并简要解读
+timeout: 120
+params:
+  url: {required: true, pattern: "^https?://[A-Za-z0-9./_-]+$"}
+  method: {default: "GET", pattern: "^(GET|POST)$"}
+steps:
+  - "curl -sS -m 30 -X {method} {url} | head -c 4000"
+report: >-
+  第一行结论（HTTP 成功/失败 + 状态码）；正文最多10行，摘录响应中的关键字段并给出解读

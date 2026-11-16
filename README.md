@@ -1,100 +1,47 @@
-# WeLink ↔ CodeAgentCLI Bridge（常驻主 agent 架构）
+# WeLink ↔ CodeAgent Bridge
 
-常驻 Python 脚本，把指定 WeLink 群里"你本人发的消息"交给一个常驻 CodeAgentCLI 进程（stream-json 模式）处理，保持多轮对话上下文连续。主 agent 决定直接回复还是启动子 agent 跑长任务，结果加 `🤖 [Agent]` 前缀发回群里。
+内网 Windows 机常驻桥：群里发自然语言 → 常驻主 agent（codeagent）理解 → 预定义任务模板
+渲染出确定命令 → 🔐 确认门逐字核验 → 子 agent 执行（并发 3，心跳，安静模式）→ 结果简报回群。
 
-## 架构
+设计原则：执行动作 100% 来自任务模板，LLM 无自主重试权；每个写操作必过人工确认门。
 
-```
-你在群里发消息
-  → Bridge 轮询 query-history-message
-  → 过滤 sender==本人 且 content 不以 🤖/📡/❓/🔐 前缀开头
-  → 喂给常驻 codeagent stream-json 进程（保持对话上下文）
-  → 主 agent 决定：
-      ├─ 直接回复 → 加 🤖 前缀发回群
-      └─ 输出 [[SPAWN_SKILL: name args]] → 参数确认门 → spawn 子进程跑 skill → 结果发群
-  → 常驻进程崩溃时自动重启
-```
+## 文件地图（读者：维护 agent）
 
-## 文件
-
-| 文件 | 作用 |
+| 路径 | 作用 |
 |---|---|
-| `bridge.py` | 主脚本：WeLink 收发、常驻进程管理、skill 并发控制、崩溃恢复 |
-| `resident_prompt.md` | 主 agent system prompt（决策规则、输出格式） |
-| `bridge_state.json` | watermark（自动生成，重启续跑） |
-| `proc_registry.json` | 子进程 PID 注册表（自动生成，启动时清理孤儿） |
-| `bridge.log` | 运行日志（自动生成） |
+| `bridge/bridge.py` | 入口（argparse → wabridge.main.Bridge） |
+| `bridge/wabridge/config.py` | 配置：CLI > 环境变量 > config.yaml > 默认 |
+| `bridge/wabridge/welink.py` | welink-cli 封装：分段发送(每段带前缀)/429退避/增量拉取 |
+| `bridge/wabridge/agentio.py` | ResidentAgent(stream-json 常驻) + TaskRunner(任务子进程) |
+| `bridge/wabridge/templates.py` | 任务模板 `tasks/*.yaml` 加载/校验/渲染 |
+| `bridge/wabridge/registry.py` | 任务实例 `#N` 身份、寻址解析、持久化 |
+| `bridge/wabridge/gates.py` | 异步确认门状态机（单门裸答/多门指认/修正重发/超时） |
+| `bridge/wabridge/scheduler.py` | 并发上限 + exclusive 独占 + 队列容量 + 落盘续跑 |
+| `bridge/wabridge/main.py` | 主循环：消息分类路由(门/指令/批处理闲聊)、生命周期 |
+| `bridge/wabridge/state.py` | bridge_state.json + proc_registry.json(孤儿清理) |
+| `bridge/wabridge/procs.py` | 跨平台进程树强杀（Windows taskkill /T；POSIX 进程组） |
+| `bridge/resident_prompt.md` | 主 agent system prompt（模板清单启动时自动追加） |
+| `bridge/tasks/` | 任务模板目录 |
+| `bridge/doctor.py` | 部署机自诊断（输出整段发给开发方） |
+| `AGENT-OPS.md` | 内网部署机操作手册（给那台机器上的 agent 照做） |
+| `tests/sim/` | welink-cli / codeagent 高保真模拟器 |
+| `tests/e2e/` | 端到端：真实 bridge 进程 × 模拟器 × 群消息状态机 |
+| `tests/unit/` | 核心逻辑单测 |
 
-## 前置条件
+## 快速开始
 
-1. `welink-cli` 已全局安装（实际调用 `welink-cli.cmd`），可用 `--welink-cli-bin` 或 `WELINK_CLI_BIN` 指定。
-2. `codeagent` 已安装（实际调用 `codeagent.bat`），可用 `--codeagent-bin` 或 `CODEAGENT_BIN` 指定。
-3. 已 `welink-cli auth login` 完成 OAuth 登录。
-4. 已创建交互用 WeLink 群，并把群 ID 传给 Bridge。
-5. skill 放在 `~/.cac/skills/<name>/SKILL.md`。
+部署与验收一律按 [AGENT-OPS.md](AGENT-OPS.md) 的编号步骤执行（A 节首次部署 / B 节加任务模板 / D 节排障）。
 
-## 启动
+开发侧本地验证（无需内网）：
 
 ```bash
-# 首次启动：跳过历史消息
-python F:\welink-cli\bridge\bridge.py --skip-history
-
-# 精确指定起点
-python F:\welink-cli\bridge\bridge.py --init-watermark 89713690597261161
-
-# 自定义参数
-python F:\welink-cli\bridge\bridge.py \
-  --group-id 1023824099283107996 \
-  --self-account w00921547 \
-  --poll-interval 15 \
-  --agent-timeout 600 \
-  --max-concurrent 3 \
-  --resident-timeout 300
+pip install pyyaml
+python -m pytest tests/unit tests/e2e -q     # 全绿才算改动有效
 ```
 
-停止：`Ctrl+C`，state 自动落盘，常驻进程被停止。
+## 消息协议（bridge 视角）
 
-## 参数
-
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--group-id` | `1023824099283107996` | WeLink 群 ID |
-| `--self-account` | `w00921547` | 本人 WeLink 账号 |
-| `--poll-interval` | `15` | 轮询间隔（秒） |
-| `--agent-timeout` | `900` | skill 子 agent 超时（秒） |
-| `--max-concurrent` | `1` | 同时运行的 skill 子进程数上限 |
-| `--resident-timeout` | `60` | 常驻主 agent 单轮响应超时（秒） |
-| `--resident-prompt` | `resident_prompt.md` | 主 agent system prompt 文件 |
-| `--skip-history` | - | 启动时跳过历史消息 |
-| `--init-watermark` | `0` | 精确设置起始 watermark |
-| `--control-plane` | `essential` | 控制面级别：off/essential/all |
-| `--control-debounce` | `5` | 同事件类型最小间隔（秒） |
-| `--queue-warn` | `3` | 队列积压告警阈值 |
-| `--welink-cli-bin` | PATH 解析 | welink-cli 可执行文件路径 |
-| `--codeagent-bin` | PATH 解析 | codeagent 可执行文件路径 |
-
-## SPAWN_SKILL 格式
-
-主 agent 回复中包含 `[[SPAWN_SKILL: <skill名> <参数>]]` 时，Bridge 解析后启动子 agent：
-
-```
-收到，开始执行任务。
-[[SPAWN_SKILL: my-skill 参数1=值 参数2=值]]
-```
-
-Bridge 会：提取 skill 名和参数 → 参数确认门（展示参数等待用户确认/修正）→ spawn 独立 codeagent 子进程流式执行 → 把输出发回群 → 通知常驻主 agent 子任务完成。
-
-## 中途停止
-
-skill 运行中用户在群里发"停止/stop"等关键词，Bridge 会 taskkill 子进程树并通知。
-
-## 崩溃恢复
-
-常驻 codeagent 进程退出时，Bridge 自动重启，并发群通知 `🔄 主 agent 重启中`。启动时通过 `proc_registry.json` 清理上次残留的孤儿进程。
-
-## 添加新 Skill
-
-1. 创建 `~/.cac/skills/<name>/SKILL.md`，写 frontmatter（name, description）+ 执行步骤。
-2. 在 `resident_prompt.md` 的"可用 skill"章节补充说明。
-3. 如需参数确认门展示默认参数，在 `bridge.py` 的 `SKILL_DEFAULTS` 中为 skill 添加条目。
-4. 重启 bridge。
+- 入：仅 `self_account` 的裸文本；🤖/📡/❓/🔐 前缀消息视为自身输出跳过。
+- 指令词：`状态` / `停止 [#N]` / `停止全部` / `清空队列`；确认门：`确认` / `取消` / `k=v`。
+- 主 agent 输出标记：`[[SPAWN_TASK: <模板名> k=v ...]]`（一轮可多个），其余输出直接转发群。
+- 任务消息一律带 `[任务#N 短名]` 身份头；心跳 `⏳` 每 `heartbeat_interval` 秒。

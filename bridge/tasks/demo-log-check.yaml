@@ -1,0 +1,12 @@
+name: demo-log-check
+description: 查看指定日志目录，总结错误分布与性能要点（纯只读，不改动任何东西，免确认门）
+readonly: true
+timeout: 300
+params:
+  logdir: {default: "/tmp/logs", pattern: "^/.*"}
+  days: {default: "1", pattern: "^[0-9]{1,3}$"}
+steps:
+  - "cd {logdir} && grep -irE 'error|fail|exception' . --include='*.log' | tail -n 200"
+  - "grep -hoE 'took [0-9]+ms|latency[=: ][0-9]+' *.log 2>/dev/null | tail -n 200"
+report: >-
+  第一行结论：近 {days} 天错误数量 + 出现最多的3种错误模式；然后给性能要点（延迟均值/最大值）；没有日志就明说

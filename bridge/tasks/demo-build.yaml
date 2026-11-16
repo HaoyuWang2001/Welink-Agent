@@ -1,0 +1,13 @@
+name: demo-build
+description: 在指定工作区的指定分支/tag 上执行项目编译（耗时长，独占机器资源）
+exclusive: true
+timeout: 900
+params:
+  workspace: {default: "/tmp/ws/demo", pattern: "^/.*"}
+  branch: {default: "master", pattern: "^[A-Za-z0-9._/-]+$"}
+  tag: {required: true, pattern: "^[A-Za-z0-9._-]+$"}
+steps:
+  - "cd {workspace} && git checkout {branch}"
+  - "make build TAG={tag} BRANCH={branch}"
+report: >-
+  第一行结论（成功/失败 + 产物名）；第二行耗时；失败时附关键错误行（最多5行）和完整日志路径

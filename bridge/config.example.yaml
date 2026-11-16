@@ -1,0 +1,30 @@
+# WeLink <-> CodeAgent bridge 配置模板。
+# 复制为 bridge/config.yaml 并填写真实值（config.yaml 不进仓库）。
+
+welink:
+  group_id: "REPLACE_ME_群ID"
+  self_account: "REPLACE_ME_姓氏首字母+工号"   # 如 z00123456
+  cli_bin: welink-cli.cmd
+  poll_interval: 15        # 秒
+  chunk_limit: 1800        # 单条群消息最大字符数（保守值）
+  send_timeout: 30
+  query_count: 100
+
+agent:
+  bin: codeagent.bat
+  resident_timeout: 60     # 常驻主 agent 单轮超时（秒）
+  task_timeout_default: 900  # 任务未在模板指定 timeout 时的默认值
+  max_concurrent: 3        # 普通任务并发上限
+  heartbeat_interval: 300  # 运行中任务心跳（秒），0=关
+  queue_capacity: 6        # 确认后排队上限
+
+confirm:
+  timeout: 300             # 确认门等待用户回复超时（秒）
+  choice_timeout: 120      # 澄清追问（如"停止哪个"）等待超时（秒）
+
+paths:
+  # workdir: 默认 = bridge 包目录（config.yaml 同级）；state/log/task_logs 落在这里
+  tasks_dir: tasks
+  resident_prompt: resident_prompt.md
+
+control_plane: essential   # off=只在任务消息里体现状态 | essential=异常/重启也发群
