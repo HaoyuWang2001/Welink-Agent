@@ -25,7 +25,7 @@ class Gate:
 
 class GateManager:
     def __init__(self, cfg, welink, registry, logger, on_confirm, on_cancel,
-                 render_steps_fn, param_valid_fn):
+                 render_steps_fn, param_valid_fn, render_desc_fn=None):
         self.cfg = cfg
         self.welink = welink
         self.registry = registry
@@ -33,13 +33,14 @@ class GateManager:
         self.on_confirm = on_confirm          # (task, params, sources)
         self.on_cancel = on_cancel            # (task, reason, note)
         self.render_steps = render_steps_fn   # (template_name, params) -> list[str]
+        self.render_desc = render_desc_fn     # (template_name, params) -> list[str]|None
         self.validate_param = param_valid_fn  # (template_name, k, v) -> err|None
         self.lock = threading.Lock()
         self.pending = {}                     # tid -> Gate
         self._last_ambig = {}
 
     # ---------- 开关门 ----------
-    def open(self, task, params, sources, note="", resend=False):
+    def open(self, task, params, sources, note="", resend=False, desc_lines=None):
         tmpl = task.name
         try:
             steps = self.render_steps(tmpl, params)
@@ -47,6 +48,10 @@ class GateManager:
             self.on_cancel(task, "error", f"缺少参数: {e.args}")
             return False
         lines = [f"即将执行 {task.label()}" + ("（更新确认）" if resend else "")]
+        if desc_lines:
+            lines.append("任务意图:")
+            for dline in desc_lines:
+                lines.append(f"  · {dline}")
         if params:
             lines.append("参数:")
             for k in sorted(params):
@@ -151,12 +156,15 @@ class GateManager:
             new_sources[k] = "user"
         self.close(task.tid)
         note = "；".join(errs[:3]) if errs else ""
+        desc = self.render_desc(task.name, new_params) if self.render_desc else None
         if new_params != gate.params:
-            self.open(task, new_params, new_sources, note=note, resend=True)
+            self.open(task, new_params, new_sources, note=note, resend=True,
+                      desc_lines=desc)
         else:
             note2 = (note or "未识别到有效参数修改")
             self.open(task, new_params, new_sources, note=note2 +
-                      "。回复『确认』可直接开始，『取消』放弃。", resend=True)
+                      "。回复『确认』可直接开始，『取消』放弃。", resend=True,
+                      desc_lines=desc)
 
     def _ask_disambig(self, pendings):
         now = time.time()

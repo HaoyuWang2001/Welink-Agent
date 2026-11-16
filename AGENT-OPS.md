@@ -55,6 +55,20 @@
 - 日志位置：`bridge/bridge.log`（总日志）、`bridge/task_logs/task-<编号>-<模板>.log`（每任务原始输出）。
   排障时把相关文件整段发给开发方，不要节选。
 
+## C2. compile-mooncake 任务专用须知
+
+1. **前置源码修复（一次性，人来做）**：`Services-Deployment/services/ssh-0-mooncake-compile/build-mooncake.sh`
+   第 7 行现为写死 `CLEAN_BUILD=false`，会覆盖服务注入的环境变量。必须改成
+   `CLEAN_BUILD=${CLEAN_BUILD:-false}` 并重新部署该服务，否则确认门里选什么都永远是增量编译。
+   验证：部署后在 WebUI 里带变量启动一次，日志里清理分支是否按预期触发。
+2. 任务由 `bridge/tasks/scripts/watch_mooncake.py` 全程执行（提交→轮询→判定→取日志），
+   子 agent 只运行这一条命令并转述输出。改监视行为=改这个脚本（开发方的活）。
+3. 群里说法样例：`编译mooncake`（默认全量重编、已有实例在跑则放弃）；
+   `增量编译mooncake`→门里 `clean_build=false`；`排队编译mooncake`→`on_running=wait`；
+   `停止mooncake编译`→`action=stop`。
+4. 任务超时预算：模板 3900s。脚本报 RESULT: TIMEOUT 时编译仍在服务端跑，
+   需要停就用 action=stop，不要重复提交（会撞上 on_running 保护）。
+
 ## D. 排障表
 
 | 症状 | 处理 |

@@ -2,13 +2,15 @@
 
 模板 schema（字段均可缺省）:
   name            必填, ^[a-z0-9][a-z0-9_-]*$
+  title           群消息短名（默认=name）
   description     给常驻主 agent 判断适用性
   readonly        true 时豁免确认门
   exclusive       true 时独占执行
   timeout         整任务超时秒（默认取 config）
   heartbeat       心跳间隔秒, 0=关（默认取 config）
   cwd             子 agent 工作目录（默认 bridge workdir 上级）
-  params          {k: {default, required, pattern}}
+  params          {k: {default, required, pattern, desc, example}}
+  confirm_steps   确认门里的可读意图描述（可选；完整命令始终照原样展示）
   steps           ["命令模板 {param}", ...]，渲染后即为将执行的逐字内容
   report          简报格式要求（发给执行 agent）
 """
@@ -35,6 +37,7 @@ class Template:
         if not NAME_RE.match(name):
             raise TemplateError(f"模板名非法: {name!r}（需匹配 {NAME_RE.pattern}）")
         self.name = name
+        self.title = str(d.get("title") or name)
         self.description = str(d.get("description", ""))
         self.readonly = bool(d.get("readonly", False))
         self.exclusive = bool(d.get("exclusive", False))
@@ -59,11 +62,15 @@ class Template:
         if not isinstance(steps, list) or not all(isinstance(s, str) for s in steps):
             raise TemplateError(f"{name}: steps 必须是字符串列表")
         self.steps = steps
+        desc = d.get("confirm_steps") or []
+        if not isinstance(desc, list) or not all(isinstance(s, str) for s in desc):
+            raise TemplateError(f"{name}: confirm_steps 必须是字符串列表")
+        self.confirm_steps = desc
         self._check_placeholders()
 
     def _check_placeholders(self):
         allowed = set(self.params)
-        text = "\n".join(self.steps) + "\n" + self.report
+        text = "\n".join(self.steps + self.confirm_steps) + "\n" + self.report
         for ph in set(PLACEHOLDER_RE.findall(text)):
             if ph not in allowed:
                 raise TemplateError(f"{self.name}: 引用了未定义参数 {{{ph}}}")

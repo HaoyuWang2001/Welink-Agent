@@ -23,9 +23,10 @@ ID_LEAD_RE = re.compile(r"^\s*(\d+)\b")
 
 class Task:
     def __init__(self, tid, name, params, sources, exclusive=False, readonly=False,
-                 timeout=900, heartbeat=300, short=None, cwd=None):
+                 timeout=900, heartbeat=300, short=None, cwd=None, title=None):
         self.tid = tid
         self.name = name
+        self.title = title or name
         self.params = dict(params)
         self.sources = dict(sources)      # 参数来源: default/message/user
         self.exclusive = exclusive
@@ -45,14 +46,15 @@ class Task:
         self.cwd = cwd
 
     def _make_short(self):
-        """短名 = 模板名 + 最具区分度的参数值。"""
+        """短名 = 模板标题(或名) + 最具区分度的参数值。"""
+        base = self.title
         for k in self.params:
             if self.sources.get(k) and self.sources[k] != "default":
-                return f"{self.name} {self.params[k]}"[:40].strip()
+                return f"{base} {self.params[k]}"[:40].strip()
         for k, v in self.params.items():
-            if v:
-                return f"{self.name} {v}"[:40].strip()
-        return self.name
+            if v and not v.startswith("{"):
+                return f"{base} {v}"[:40].strip()
+        return base
 
     def ident(self): return f"#{self.tid}"
     def label(self): return f"[任务#{self.tid} {self.short}]"
@@ -63,6 +65,7 @@ class Task:
 
     def to_dict(self):
         return {"tid": self.tid, "name": self.name, "short": self.short,
+                "title": self.title,
                 "params": self.params, "sources": self.sources,
                 "exclusive": self.exclusive, "readonly": self.readonly,
                 "timeout": self.timeout, "heartbeat": self.heartbeat,
@@ -75,7 +78,7 @@ class Task:
         t = Task(d["tid"], d["name"], d.get("params") or {}, d.get("sources") or {},
                  exclusive=d.get("exclusive", False), readonly=d.get("readonly", False),
                  timeout=d.get("timeout", 900), heartbeat=d.get("heartbeat", 300),
-                 short=d.get("short"), cwd=d.get("cwd"))
+                 short=d.get("short"), cwd=d.get("cwd"), title=d.get("title"))
         t.status = d.get("status", ST_QUEUED)
         t.created_ts = d.get("created", time.time())
         return t
@@ -143,10 +146,11 @@ class TaskRegistry:
             if t and (statuses is None or t.status in statuses) and t.tid not in seen:
                 out.append(t); seen.add(t.tid)
         toks = re.findall(r"[a-z0-9][a-z0-9_-]{2,}", text.lower())
+        low = text.lower()
         for t in self.tasks.values():
             if t.tid in seen or (statuses is not None and t.status not in statuses):
                 continue
-            if t.name in toks:
+            if t.name in toks or (t.title.lower() != t.name and t.title.lower() in low):
                 out.append(t); seen.add(t.tid)
         return out
 

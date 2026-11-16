@@ -1,19 +1,37 @@
 name: compile-mooncake
 title: 编译 mooncake
 description: >-
-  151 真机（node4-compile）编译 mooncake 并发布 whl。用户可能说：151真机编译mooncake、
-  编译mooncake在151真机上、编译mooncake、编译一下mooncake、编译 mooncake、跑一下 mooncake 编译。
-  调用本机 8310 服务 ssh-0-mooncake-compile 启动/停止编译。
-timeout: 120
+  151 真机（node4-compile）编译 mooncake 并发布 whl 到四节点。用户可能说：151真机编译mooncake、
+  编译mooncake在151真机上、编译mooncake、编译一下mooncake、编译 mooncake、跑一下 mooncake 编译、
+  停止mooncake编译/停掉编译（此时 action=stop）。
+  由本机脚本提交任务到 127.0.0.1:8310 的 ssh-0-mooncake-compile 服务并轮询监视到编译结束才汇报，
+  不是发完请求就完事。
+exclusive: true
+timeout: 3900
+heartbeat: 120
 params:
-  action: {default: "start", pattern: "^(start|stop)$", desc: "操作（start=开始编译，stop=停止编译）", example: "start"}
-  node: {default: "node4-compile", pattern: "^[A-Za-z0-9._-]+$", desc: "编译节点", example: "node4-compile"}
+  action: {default: "start", pattern: "^(start|stop)$",
+           desc: "start=提交编译并等待结果；stop=停止当前编译", example: "start"}
+  node: {default: "node4-compile", pattern: "^[A-Za-z0-9._-]+$",
+         desc: "编译节点", example: "node4-compile"}
+  clean_build: {default: "true", pattern: "^(true|false)$",
+                desc: "注入服务的 CLEAN_BUILD 环境变量：true=清空build目录全量重编，false=增量",
+                example: "true"}
+  on_running: {default: "abort", pattern: "^(abort|wait)$",
+               desc: "若已有编译实例在运行：abort=不提交并报告谁在跑；wait=排队等它结束后再开始",
+               example: "abort"}
 confirm_steps:
-  - "向 http://127.0.0.1:8310/api/tasks 提交任务 ssh-0-mooncake-compile，在 {node} 节点上执行。"
+  - "向 {node} 的 ssh-0-mooncake-compile 服务提交编译（action={action}）"
+  - "注入环境变量 CLEAN_BUILD={clean_build}（true=全量重编）"
+  - "若已有实例在跑按 on_running={on_running} 处理；实例异常退出态会先自动 stop 清理再启动"
+  - "轮询监视到编译成功/失败才结束，最长约 55 分钟"
 steps:
   - >-
-    curl -sS -m 30 -X POST http://127.0.0.1:8310/api/tasks
-    -H "Content-Type: application/json"
-    -d "{{\"service\":\"ssh-0-mooncake-compile\",\"action\":\"{action}\",\"nodes\":[\"{node}\"],\"auto_start\":true}}"
+    python bridge/tasks/scripts/watch_mooncake.py --action {action} --node {node}
+    --clean-build {clean_build} --on-running {on_running}
 report: >-
-  第一行结论（是否已开始编译 + 任务编号）；若失败说明原因；不要等待编译完成
+  以脚本输出最后一行 RESULT 为唯一判据：SUCCESS=编译成功；FAILED=提交被拒或编译失败；
+  ABORTED=按 on_running 放弃或实例需人工处理；TIMEOUT=超预算仍在编译；STOPPED=已停止。
+  简报格式：第一行结论（RESULT 类型 + CLEAN_BUILD 值 + 节点）；第二行 run_id 与耗时；
+  FAILED 时把脚本打的日志尾部里最关键的3行以内错误转述出来；
+  TIMEOUT 时提醒可再发『停止mooncake编译』。不要自行重试提交。

@@ -66,7 +66,8 @@ class Bridge:
                                        on_confirm=self._on_confirm,
                                        on_cancel=self._on_gate_abort,
                                        render_steps_fn=self._render_steps,
-                                       param_valid_fn=self._validate_param)
+                                       param_valid_fn=self._validate_param,
+                                       render_desc_fn=self._render_desc)
         self.scheduler = Scheduler(cfg, self.log, self.state, self.registry,
                                    run_fn=self._run_task, on_result=self._on_result)
         self.choice = None
@@ -401,8 +402,9 @@ class Bridge:
         hb = self.cfg.heartbeat_interval if tmpl.heartbeat is None else float(tmpl.heartbeat)
         task = self.registry.new_task(
             name, params, sources, exclusive=tmpl.exclusive, readonly=tmpl.readonly,
-            timeout=timeout, heartbeat=hb, cwd=tmpl.cwd)
+            timeout=timeout, heartbeat=hb, cwd=tmpl.cwd, title=tmpl.title)
         note = "；".join(warns[:3])
+        desc = self._render_desc(name, params)
         if task.readonly:
             if note:
                 self.welink.send(f"⚠️ {task.label()} 只读任务参数不完整：{note}，未执行。")
@@ -411,12 +413,21 @@ class Bridge:
             self.welink.send(f"🚀 {task.label()} 只读任务免确认，直接排队。")
             self._on_confirm(task, params, sources, quiet=True)
         else:
-            self.gates.open(task, params, sources, note=note)
+            self.gates.open(task, params, sources, note=note, desc_lines=desc)
 
     # ---------- 门回调 ----------
     def _render_steps(self, name, params):
         tmpl = self.templates[name]
         return tmpl.render_steps(params)
+
+    def _render_desc(self, name, params):
+        tmpl = self.templates.get(name)
+        if tmpl is None or not tmpl.confirm_steps:
+            return None
+        try:
+            return [s.format(**params) for s in tmpl.confirm_steps]
+        except KeyError:
+            return tmpl.confirm_steps
 
     def _validate_param(self, name, k, v):
         tmpl = self.templates.get(name)

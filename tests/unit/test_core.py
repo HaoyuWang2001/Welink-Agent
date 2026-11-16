@@ -62,10 +62,15 @@ def test_config_paths_absolute_override(tmp_path):
 
 def test_repo_templates_load():
     tmpls = load_templates(TASKS_DIR)
-    assert set(tmpls) == {"demo-build", "demo-log-check", "demo-api-probe"}
+    assert set(tmpls) == {"compile-mooncake", "demo-build", "demo-log-check",
+                          "demo-api-probe"}
     assert tmpls["demo-build"].exclusive and not tmpls["demo-build"].readonly
     assert tmpls["demo-log-check"].readonly
     assert tmpls["demo-api-probe"].params["url"]["required"]
+    cm = tmpls["compile-mooncake"]
+    assert cm.title == "编译 mooncake" and cm.exclusive and not cm.readonly
+    assert cm.confirm_steps and cm.params["clean_build"]["default"] == "true"
+    assert cm.params["on_running"]["default"] == "abort"
 
 
 def test_template_errors(tmp_path):

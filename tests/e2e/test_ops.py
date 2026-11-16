@@ -56,3 +56,34 @@ def test_skip_history_on_start(tmp_path):
         env.wait_for("NEW-ONLY")
     finally:
         env.stop()
+
+
+def test_real_compile_mooncake_template_gate(tmp_path):
+    """真实模板 compile-mooncake：确认门展示意图描述+title 短名+CLEAN_BUILD，
+    修改参数后渲染命令随之更新。"""
+    repo_tpl = (REPO / "bridge" / "tasks" / "compile-mooncake.yaml").read_text(
+        encoding="utf-8")
+    scen = {"resident": {"responses": [
+        {"contains": "编译mooncake", "text": "好的。\n[[SPAWN_TASK: compile-mooncake]]"}],
+        "default": "好"},
+        "tasks": {"name:compile-mooncake": {"mode": "ok",
+                                            "final": "RESULT: SUCCESS 编译成功"}}}
+    env = SimEnv(tmp_path, scenario=scen,
+                 templates={"compile-mooncake.yaml": repo_tpl})
+    with env:
+        env.user_say("编译mooncake")
+        env.wait_for("即将执行")
+        gate = "".join(env.bridge_texts())          # gate 长会分段，合并断言
+        assert "[任务#1 编译 mooncake start]" in gate      # title+区分参数作短名
+        assert "任务意图:" in gate                       # confirm_steps 渲染
+        assert "CLEAN_BUILD=true" in gate
+        assert "--clean-build true" in gate
+        assert "--on-running abort" in gate
+        assert "watch_mooncake.py" in gate               # 逐字命令行
+        env.user_say("on_running=wait clean_build=false")
+        env.wait_for("（更新确认）")
+        g2 = "".join(env.bridge_texts())
+        assert "--on-running wait" in g2 and "--clean-build false" in g2
+        assert "（你修改）" in g2
+        env.user_say("确认")
+        env.wait_for("RESULT: SUCCESS 编译成功")
