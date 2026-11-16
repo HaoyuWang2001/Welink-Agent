@@ -1,0 +1,19 @@
+name: compile-mooncake
+title: 编译 mooncake
+description: >-
+  151 真机（node4-compile）编译 mooncake 并发布 whl。用户可能说：151真机编译mooncake、
+  编译mooncake在151真机上、编译mooncake、编译一下mooncake、编译 mooncake、跑一下 mooncake 编译。
+  调用本机 8310 服务 ssh-0-mooncake-compile 启动/停止编译。
+timeout: 120
+params:
+  action: {default: "start", pattern: "^(start|stop)$", desc: "操作（start=开始编译，stop=停止编译）", example: "start"}
+  node: {default: "node4-compile", pattern: "^[A-Za-z0-9._-]+$", desc: "编译节点", example: "node4-compile"}
+confirm_steps:
+  - "向 http://127.0.0.1:8310/api/tasks 提交任务 ssh-0-mooncake-compile，在 {node} 节点上执行。"
+steps:
+  - >-
+    curl -sS -m 30 -X POST http://127.0.0.1:8310/api/tasks
+    -H "Content-Type: application/json"
+    -d "{{\"service\":\"ssh-0-mooncake-compile\",\"action\":\"{action}\",\"nodes\":[\"{node}\"],\"auto_start\":true}}"
+report: >-
+  第一行结论（是否已开始编译 + 任务编号）；若失败说明原因；不要等待编译完成
